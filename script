@@ -1,0 +1,1748 @@
+--[[
+   World Script v5.0 REWRITE
+   Toggle UI : M key
+   Fly       : WASD + Space (up) + LShift (down)
+--]]
+
+-- ============================================================
+--  Services
+-- ============================================================
+local Players          = game:GetService("Players")
+local Lighting         = game:GetService("Lighting")
+local TeleportService  = game:GetService("TeleportService")
+local UserInputService = game:GetService("UserInputService")
+local RunService       = game:GetService("RunService")
+local Stats            = game:GetService("Stats")
+local Debris           = game:GetService("Debris")
+local TweenService     = game:GetService("TweenService")
+local CoreGui          = game:GetService("CoreGui")
+local HttpService      = game:GetService("HttpService")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera      = workspace.CurrentCamera
+
+-- ============================================================
+--  GUI Parent
+-- ============================================================
+local function getGuiParent()
+    local ok = pcall(function()
+        local t = Instance.new("ScreenGui"); t.Parent = CoreGui; t:Destroy()
+    end)
+    return ok and CoreGui or LocalPlayer:WaitForChild("PlayerGui")
+end
+local GuiParent = getGuiParent()
+
+local GUI_NAME = "WS_v5_Dark"
+for _, g in ipairs(GuiParent:GetChildren()) do
+    if g.Name == GUI_NAME then g:Destroy() end
+end
+pcall(function()
+    for _, g in ipairs(CoreGui:GetChildren()) do
+        if g.Name == GUI_NAME then g:Destroy() end
+    end
+end)
+
+-- ============================================================
+--  State
+-- ============================================================
+local InfiniteJump       = false
+local Noclip             = false
+local FlyEnabled         = false
+local FlySpeed           = 50
+local GodModeEnabled     = false
+local HeadlessEnabled    = false
+local InvisEnabled       = false
+local SlipperyEnabled    = false
+local TrailEnabled       = false
+local AuraEnabled        = false
+local GroundTrailEnabled = false
+local SelectedPlayer     = nil
+
+local WeatherType    = "Clear"
+local WeatherEnabled = false
+local ThunderEnabled = false
+local ThunderTimer   = 0
+_G.ThunderInterval   = 5
+_G.WeatherDensity    = 5
+_G.WindStrength      = 10
+_G.WindDirection     = 0
+
+local MeteorEnabled  = false
+local MeteorSize     = 3
+local MeteorSpeed    = 80
+local MeteorRate     = 0.5
+local MeteorTimer    = 0
+_G.MeteorColor           = Color3.fromRGB(110,90,70)
+_G.MeteorFireColor       = Color3.fromRGB(255,140,40)
+_G.MeteorExplosions      = true
+_G.MeteorExplosionRadius = 5
+
+local SkyboxSpinEnabled = false
+local SkyboxSpinSpeed   = 1
+_G.SkyboxSpinAxis       = "Horizontal"
+
+local ESP_Names            = false
+local ESP_Distance         = false
+local ESP_Health           = false
+local ESP_HighlightEnabled = false
+local ESP_HighlightColor   = Color3.fromRGB(255,255,255)
+local ESP_HighlightFill    = 0.15
+local ESP_HighlightOutline = 0.0
+_G.ChamsOnTop   = true
+_G.ESPTeamColor = false
+
+local RainbowLighting = false
+local FlickerLights   = false
+local DayCycleEnabled = false
+local AuroraEnabled   = false
+_G.DayCycleSpeed    = 0.1
+_G.RainbowSpeed     = 0.08
+_G.FlickerIntensity = 2
+_G.SmokeDensity     = 3
+_G.TrailR = 200; _G.TrailG = 80; _G.TrailB = 255
+_G.AuroraColor = Color3.fromRGB(0,200,150)
+
+-- ============================================================
+--  Save Original State
+-- ============================================================
+local EffectsFolder = workspace:FindFirstChild("WSFXv5") or Instance.new("Folder", workspace)
+EffectsFolder.Name  = "WSFXv5"
+
+local OriginalParts = {}
+for _, obj in ipairs(workspace:GetDescendants()) do
+    if obj:IsA("BasePart") then
+        OriginalParts[obj] = {
+            Color=obj.Color, Material=obj.Material,
+            Reflectance=obj.Reflectance, Transparency=obj.Transparency,
+        }
+    end
+end
+
+local OriginalLighting = {
+    Brightness=Lighting.Brightness, Ambient=Lighting.Ambient,
+    OutdoorAmbient=Lighting.OutdoorAmbient, FogColor=Lighting.FogColor,
+    FogEnd=Lighting.FogEnd, FogStart=Lighting.FogStart,
+    ClockTime=Lighting.ClockTime, GeographicLatitude=Lighting.GeographicLatitude,
+}
+
+local BloomEffect = Instance.new("BloomEffect",Lighting)
+BloomEffect.Enabled=false; BloomEffect.Intensity=1; BloomEffect.Size=24; BloomEffect.Threshold=0.95
+
+local ColorCorrection = Instance.new("ColorCorrectionEffect",Lighting)
+ColorCorrection.Enabled=false
+
+local SunRays = Instance.new("SunRaysEffect",Lighting)
+SunRays.Enabled=false; SunRays.Intensity=0.25; SunRays.Spread=0.5
+
+local DOF = Instance.new("DepthOfFieldEffect",Lighting)
+DOF.Enabled=false; DOF.FarIntensity=0.5; DOF.NearIntensity=0.5; DOF.FocusDistance=50
+
+local MotionBlur = Instance.new("BlurEffect",Lighting)
+MotionBlur.Enabled=false; MotionBlur.Size=10
+
+local Sky = Lighting:FindFirstChildOfClass("Sky") or Instance.new("Sky",Lighting)
+local OriginalSky = {
+    SkyboxBk=Sky.SkyboxBk, SkyboxDn=Sky.SkyboxDn, SkyboxFt=Sky.SkyboxFt,
+    SkyboxLf=Sky.SkyboxLf, SkyboxRt=Sky.SkyboxRt, SkyboxUp=Sky.SkyboxUp,
+    StarCount=Sky.StarCount, MoonAngularSize=Sky.MoonAngularSize, SunAngularSize=Sky.SunAngularSize,
+}
+
+-- ============================================================
+--  Weather
+-- ============================================================
+local WeatherLighting = {
+    Sunny      ={t=12,b=3.2,a=Color3.fromRGB(100,100,70),oa=Color3.fromRGB(220,220,180),fe=2500,fc=Color3.fromRGB(220,220,200)},
+    PartlyCloudy={t=13,b=1.6,a=Color3.fromRGB(90,90,80),oa=Color3.fromRGB(155,155,140),fe=1400,fc=Color3.fromRGB(200,205,210)},
+    Cloudy     ={t=12,b=0.8,a=Color3.fromRGB(80,85,95), oa=Color3.fromRGB(110,115,125),fe=700, fc=Color3.fromRGB(155,160,170)},
+    Overcast   ={t=12,b=0.5,a=Color3.fromRGB(65,65,75), oa=Color3.fromRGB(85,85,95),  fe=500, fc=Color3.fromRGB(130,130,140)},
+    Rainy      ={t=12,b=0.5,a=Color3.fromRGB(55,60,75), oa=Color3.fromRGB(75,85,100), fe=320, fc=Color3.fromRGB(95,115,135)},
+    Stormy     ={t=10,b=0.2,a=Color3.fromRGB(35,40,50), oa=Color3.fromRGB(45,50,65),  fe=180, fc=Color3.fromRGB(55,65,75),  thunder=true},
+    Snowy      ={t=12,b=1.3,a=Color3.fromRGB(150,165,185),oa=Color3.fromRGB(190,205,225),fe=450,fc=Color3.fromRGB(215,228,245)},
+    Foggy      ={t=12,b=0.5,a=Color3.fromRGB(105,110,115),oa=Color3.fromRGB(125,130,135),fe=90,fc=Color3.fromRGB(180,185,192),fs=5},
+    Blizzard   ={t=0, b=0.2,a=Color3.fromRGB(145,165,210),oa=Color3.fromRGB(170,192,235),fe=55,fc=Color3.fromRGB(205,220,248)},
+    Hurricane  ={t=8, b=0.15,a=Color3.fromRGB(35,45,58),oa=Color3.fromRGB(45,58,72),  fe=140, fc=Color3.fromRGB(60,72,85),  thunder=true},
+    Hot        ={t=13,b=3.0,a=Color3.fromRGB(195,145,55),oa=Color3.fromRGB(225,185,90),fe=1400,fc=Color3.fromRGB(245,228,185)},
+    Cold       ={t=10,b=0.9,a=Color3.fromRGB(75,100,155),oa=Color3.fromRGB(105,140,205),fe=650,fc=Color3.fromRGB(160,195,240)},
+    Windy      ={t=13,b=1.6,a=Color3.fromRGB(75,82,65), oa=Color3.fromRGB(135,142,120),fe=900, fc=Color3.fromRGB(185,190,175)},
+    Tornado    ={t=10,b=0.35,a=Color3.fromRGB(78,82,58),oa=Color3.fromRGB(90,95,70),  fe=280, fc=Color3.fromRGB(128,132,98)},
+}
+
+local function ApplyWeatherLighting(wtype)
+    local w = WeatherLighting[wtype]; if not w then return end
+    Lighting.ClockTime=w.t; Lighting.Brightness=w.b; Lighting.Ambient=w.a
+    Lighting.OutdoorAmbient=w.oa or w.a; Lighting.FogEnd=w.fe
+    Lighting.FogColor=w.fc; Lighting.FogStart=w.fs or 0
+    ThunderEnabled = w.thunder == true
+end
+
+local function ClearWeatherLighting()
+    Lighting.ClockTime=OriginalLighting.ClockTime; Lighting.Brightness=OriginalLighting.Brightness
+    Lighting.Ambient=OriginalLighting.Ambient; Lighting.OutdoorAmbient=OriginalLighting.OutdoorAmbient
+    Lighting.FogEnd=OriginalLighting.FogEnd; Lighting.FogStart=OriginalLighting.FogStart
+    Lighting.FogColor=OriginalLighting.FogColor; ThunderEnabled=false
+end
+
+local function SetWeather(wtype)
+    for _, o in ipairs(EffectsFolder:GetChildren()) do o:Destroy() end
+    WeatherType=wtype; WeatherEnabled=(wtype~="Clear")
+    if wtype=="Clear" then ClearWeatherLighting() else ApplyWeatherLighting(wtype) end
+end
+
+-- ============================================================
+--  Skybox Presets
+-- ============================================================
+local SkyboxPresets = {
+    Default       = {restore=true},
+    ["Deep Space"]= {StarCount=4000,SunAngularSize=5,MoonAngularSize=8,Brightness=0,ClockTime=0,Ambient=Color3.fromRGB(4,4,18),OutdoorAmbient=Color3.fromRGB(8,5,30),FogEnd=5000,FogColor=Color3.fromRGB(0,0,5)},
+    ["Night Sky"]  = {StarCount=2500,MoonAngularSize=14,Brightness=0.08,ClockTime=0,Ambient=Color3.fromRGB(12,12,38),OutdoorAmbient=Color3.fromRGB(18,18,52)},
+    ["Sunset Glow"]= {Brightness=1.4,ClockTime=18.6,Ambient=Color3.fromRGB(185,90,38),OutdoorAmbient=Color3.fromRGB(210,125,55),FogColor=Color3.fromRGB(225,145,80),FogEnd=900},
+    ["Golden Hour"]= {Brightness=1.9,ClockTime=17.2,Ambient=Color3.fromRGB(205,165,60),OutdoorAmbient=Color3.fromRGB(228,198,85),FogColor=Color3.fromRGB(240,215,140),FogEnd=1400},
+    ["Arctic Aurora"]={StarCount=1800,Brightness=0.2,ClockTime=1,Ambient=Color3.fromRGB(0,58,75),OutdoorAmbient=Color3.fromRGB(0,78,95),FogColor=Color3.fromRGB(0,95,110),FogEnd=700},
+    ["Blood Moon"]  ={StarCount=1800,MoonAngularSize=25,Brightness=0.18,ClockTime=0,Ambient=Color3.fromRGB(82,10,10),OutdoorAmbient=Color3.fromRGB(105,15,15),FogColor=Color3.fromRGB(62,5,5),FogEnd=480},
+    ["Void"]        ={StarCount=0,Brightness=0,ClockTime=0,Ambient=Color3.fromRGB(0,0,0),OutdoorAmbient=Color3.fromRGB(0,0,0),FogColor=Color3.fromRGB(0,0,0),FogEnd=35},
+    ["Neon Nights"] ={StarCount=1500,Brightness=0.08,ClockTime=0,Ambient=Color3.fromRGB(0,12,58),OutdoorAmbient=Color3.fromRGB(18,0,78),FogColor=Color3.fromRGB(8,0,55),FogEnd=380},
+    ["Storm Front"] ={Brightness=0.25,ClockTime=11,Ambient=Color3.fromRGB(38,42,52),OutdoorAmbient=Color3.fromRGB(50,55,68),FogColor=Color3.fromRGB(58,64,78),FogEnd=190},
+    ["Crystal Blue"]={Brightness=1.9,ClockTime=12,Ambient=Color3.fromRGB(38,118,205),OutdoorAmbient=Color3.fromRGB(58,165,255),FogColor=Color3.fromRGB(105,185,255),FogEnd=1100},
+    ["Purple Haze"] ={StarCount=1000,Brightness=0.4,ClockTime=1,Ambient=Color3.fromRGB(60,15,95),OutdoorAmbient=Color3.fromRGB(85,25,138),FogColor=Color3.fromRGB(70,20,115),FogEnd=550},
+    ["Desert Noon"] ={Brightness=3.2,ClockTime=13,Ambient=Color3.fromRGB(210,172,85),OutdoorAmbient=Color3.fromRGB(238,208,128),FogColor=Color3.fromRGB(248,235,185),FogEnd=2000},
+    ["Dawn"]        ={Brightness=1.0,ClockTime=6.2,Ambient=Color3.fromRGB(155,105,82),OutdoorAmbient=Color3.fromRGB(195,145,112),FogColor=Color3.fromRGB(235,185,155),FogEnd=1200},
+}
+
+local function ApplySkybox(name)
+    local p = SkyboxPresets[name]; if not p then return end
+    if p.restore then
+        Sky.SkyboxBk=OriginalSky.SkyboxBk; Sky.SkyboxDn=OriginalSky.SkyboxDn
+        Sky.SkyboxFt=OriginalSky.SkyboxFt; Sky.SkyboxLf=OriginalSky.SkyboxLf
+        Sky.SkyboxRt=OriginalSky.SkyboxRt; Sky.SkyboxUp=OriginalSky.SkyboxUp
+        Sky.StarCount=OriginalSky.StarCount; Sky.MoonAngularSize=OriginalSky.MoonAngularSize
+        Sky.SunAngularSize=OriginalSky.SunAngularSize
+    else
+        if p.StarCount       then Sky.StarCount=p.StarCount             end
+        if p.MoonAngularSize then Sky.MoonAngularSize=p.MoonAngularSize end
+        if p.SunAngularSize  then Sky.SunAngularSize=p.SunAngularSize   end
+    end
+    if p.Brightness     then Lighting.Brightness=p.Brightness         end
+    if p.ClockTime      then Lighting.ClockTime=p.ClockTime           end
+    if p.Ambient        then Lighting.Ambient=p.Ambient               end
+    if p.OutdoorAmbient then Lighting.OutdoorAmbient=p.OutdoorAmbient end
+    if p.FogColor       then Lighting.FogColor=p.FogColor             end
+    if p.FogEnd         then Lighting.FogEnd=p.FogEnd                 end
+end
+
+-- ============================================================
+--  ScreenGui
+-- ============================================================
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name           = GUI_NAME
+ScreenGui.ResetOnSpawn   = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+ScreenGui.DisplayOrder   = 999
+ScreenGui.IgnoreGuiInset = true
+ScreenGui.Parent         = GuiParent
+
+-- ============================================================
+--  Theme — Dark Grey / Black
+-- ============================================================
+local T = {
+    BG         = Color3.fromRGB(10,10,10),
+    Panel      = Color3.fromRGB(15,15,15),
+    Card       = Color3.fromRGB(20,20,20),
+    CardHov    = Color3.fromRGB(28,28,28),
+    Sidebar    = Color3.fromRGB(12,12,12),
+    Header     = Color3.fromRGB(8,8,8),
+    Accent     = Color3.fromRGB(220,220,220),
+    AccentDim  = Color3.fromRGB(160,160,160),
+    Green      = Color3.fromRGB(80,200,100),
+    Red        = Color3.fromRGB(210,60,60),
+    Orange     = Color3.fromRGB(220,140,40),
+    Blue       = Color3.fromRGB(80,140,220),
+    Text       = Color3.fromRGB(230,230,230),
+    TextSub    = Color3.fromRGB(160,160,160),
+    TextMuted  = Color3.fromRGB(80,80,80),
+    Border     = Color3.fromRGB(35,35,35),
+    BorderHov  = Color3.fromRGB(55,55,55),
+    ToggleOff  = Color3.fromRGB(35,35,35),
+    SliderBG   = Color3.fromRGB(25,25,25),
+    TabActive  = Color3.fromRGB(30,30,30),
+}
+
+-- ============================================================
+--  Helpers
+-- ============================================================
+local function New(class, props, parent)
+    local o = Instance.new(class)
+    for k,v in pairs(props) do pcall(function() o[k]=v end) end
+    if parent then o.Parent=parent end
+    return o
+end
+local function Rnd(r,p)   return New("UICorner",{CornerRadius=UDim.new(0,r)},p) end
+local function Pad(t,b,l,r,p) return New("UIPadding",{PaddingTop=UDim.new(0,t),PaddingBottom=UDim.new(0,b),PaddingLeft=UDim.new(0,l),PaddingRight=UDim.new(0,r)},p) end
+local function VList(gap,p)   return New("UIListLayout",{FillDirection=Enum.FillDirection.Vertical,Padding=UDim.new(0,gap),SortOrder=Enum.SortOrder.LayoutOrder},p) end
+local function HList(gap,p)   return New("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal,Padding=UDim.new(0,gap),SortOrder=Enum.SortOrder.LayoutOrder},p) end
+local function Stroke(col,th,p) return New("UIStroke",{Color=col,Thickness=th},p) end
+local function Tween(obj,props,t) TweenService:Create(obj,TweenInfo.new(t or 0.14,Enum.EasingStyle.Quad),props):Play() end
+
+-- ============================================================
+--  Main Window
+-- ============================================================
+local UIVisible  = true
+local isDragging = false
+local dragStart  = nil
+local winStart   = nil
+local WIN_W, WIN_H = 780, 530
+
+local Win = New("Frame",{
+    Size=UDim2.new(0,WIN_W,0,WIN_H),
+    Position=UDim2.new(0.5,-WIN_W/2,0.5,-WIN_H/2),
+    BackgroundColor3=T.BG, BorderSizePixel=0,
+    ClipsDescendants=false,
+},ScreenGui)
+Rnd(12,Win)
+Stroke(T.Border,1.5,Win)
+
+local WinClip = New("Frame",{
+    Size=UDim2.new(1,0,1,0), BackgroundTransparency=1,
+    BorderSizePixel=0, ClipsDescendants=true,
+},Win)
+Rnd(12,WinClip)
+
+-- ============================================================
+--  Header
+-- ============================================================
+local HEADER_H = 44
+
+local Header = New("Frame",{
+    Size=UDim2.new(1,0,0,HEADER_H),
+    BackgroundColor3=T.Header, BorderSizePixel=0, ZIndex=2,
+},WinClip)
+New("Frame",{Size=UDim2.new(1,0,0,1),Position=UDim2.new(0,0,1,-1),BackgroundColor3=T.Border,BorderSizePixel=0,ZIndex=3},Header)
+
+-- Logo text
+New("TextLabel",{
+    Text="WORLD SCRIPT",
+    Size=UDim2.new(0,200,1,0), Position=UDim2.new(0,14,0,0),
+    BackgroundTransparency=1,
+    TextColor3=T.Text, Font=Enum.Font.GothamBold, TextSize=13,
+    TextXAlignment=Enum.TextXAlignment.Left, ZIndex=3,
+},Header)
+New("TextLabel",{
+    Text="v5.0",
+    Size=UDim2.new(0,50,1,0), Position=UDim2.new(0,122,0,0),
+    BackgroundTransparency=1,
+    TextColor3=T.TextMuted, Font=Enum.Font.Gotham, TextSize=11,
+    TextXAlignment=Enum.TextXAlignment.Left, ZIndex=3,
+},Header)
+
+-- Header buttons
+local function HeaderBtn(icon,xOff,bgColor,hovColor)
+    local b = New("TextButton",{
+        Text=icon,
+        Size=UDim2.new(0,26,0,24), Position=UDim2.new(1,xOff,0.5,-12),
+        BackgroundColor3=bgColor, TextColor3=T.Text,
+        Font=Enum.Font.GothamBold, TextSize=11,
+        BorderSizePixel=0, AutoButtonColor=false, ZIndex=5,
+    },Header)
+    Rnd(6,b)
+    b.MouseEnter:Connect(function() Tween(b,{BackgroundColor3=hovColor}) end)
+    b.MouseLeave:Connect(function() Tween(b,{BackgroundColor3=bgColor}) end)
+    return b
+end
+
+local minimized = false
+local MinBtn   = HeaderBtn("—",-64, Color3.fromRGB(30,30,30), Color3.fromRGB(50,50,50))
+local CloseBtn = HeaderBtn("✕",-32, T.Red, Color3.fromRGB(240,80,80))
+
+MinBtn.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    local targetH = minimized and HEADER_H or WIN_H
+    for _, c in ipairs(WinClip:GetChildren()) do
+        if c ~= Header then c.Visible = not minimized end
+    end
+    Tween(Win,{Size=UDim2.new(0,WIN_W,0,targetH)},0.2)
+end)
+CloseBtn.MouseButton1Click:Connect(function() ScreenGui:Destroy() end)
+
+-- Drag
+Header.InputBegan:Connect(function(i)
+    if i.UserInputType==Enum.UserInputType.MouseButton1 then
+        isDragging=true; dragStart=i.Position; winStart=Win.Position
+    end
+end)
+UserInputService.InputChanged:Connect(function(i)
+    if isDragging and i.UserInputType==Enum.UserInputType.MouseMovement then
+        local d=i.Position-dragStart
+        Win.Position=UDim2.new(winStart.X.Scale,winStart.X.Offset+d.X,winStart.Y.Scale,winStart.Y.Offset+d.Y)
+    end
+end)
+UserInputService.InputEnded:Connect(function(i)
+    if i.UserInputType==Enum.UserInputType.MouseButton1 then isDragging=false end
+end)
+
+-- ============================================================
+--  Sidebar
+-- ============================================================
+local SIDEBAR_W = 148
+
+local Sidebar = New("Frame",{
+    Size=UDim2.new(0,SIDEBAR_W,1,-HEADER_H),
+    Position=UDim2.new(0,0,0,HEADER_H),
+    BackgroundColor3=T.Sidebar, BorderSizePixel=0,
+},WinClip)
+New("Frame",{Size=UDim2.new(0,1,1,0),Position=UDim2.new(1,-1,0,0),BackgroundColor3=T.Border,BorderSizePixel=0},Sidebar)
+
+-- ============================================================
+--  Profile Section (top of sidebar)
+-- ============================================================
+local ProfileSection = New("Frame",{
+    Size=UDim2.new(1,0,0,82),
+    BackgroundColor3=Color3.fromRGB(16,16,16),
+    BorderSizePixel=0, LayoutOrder=0,
+},Sidebar)
+New("Frame",{Size=UDim2.new(1,0,0,1),Position=UDim2.new(0,0,1,-1),BackgroundColor3=T.Border,BorderSizePixel=0},ProfileSection)
+
+-- Avatar image (using Roblox thumbnail API)
+local AvatarImg = New("ImageLabel",{
+    Size=UDim2.new(0,40,0,40),
+    Position=UDim2.new(0,10,0,10),
+    BackgroundColor3=Color3.fromRGB(30,30,30),
+    Image="rbxthumb://type=AvatarHeadShot&id="..LocalPlayer.UserId.."&w=48&h=48",
+    BorderSizePixel=0,
+},ProfileSection)
+Rnd(20,AvatarImg)
+Stroke(T.Border,1.5,AvatarImg)
+
+-- Username label
+New("TextLabel",{
+    Text=LocalPlayer.Name,
+    Size=UDim2.new(1,-58,0,18),
+    Position=UDim2.new(0,56,0,14),
+    BackgroundTransparency=1,
+    TextColor3=T.Text, Font=Enum.Font.GothamBold, TextSize=12,
+    TextXAlignment=Enum.TextXAlignment.Left,
+},ProfileSection)
+
+-- Display name or user ID
+New("TextLabel",{
+    Text="ID: "..tostring(LocalPlayer.UserId),
+    Size=UDim2.new(1,-58,0,14),
+    Position=UDim2.new(0,56,0,34),
+    BackgroundTransparency=1,
+    TextColor3=T.TextMuted, Font=Enum.Font.Gotham, TextSize=9,
+    TextXAlignment=Enum.TextXAlignment.Left,
+},ProfileSection)
+
+-- Online dot
+local onlineDot = New("Frame",{
+    Size=UDim2.new(0,8,0,8),
+    Position=UDim2.new(0,40,0,42),
+    BackgroundColor3=T.Green, BorderSizePixel=0,
+},ProfileSection)
+Rnd(4,onlineDot)
+New("TextLabel",{
+    Text="In-Game",
+    Size=UDim2.new(1,-62,0,12),
+    Position=UDim2.new(0,56,0,52),
+    BackgroundTransparency=1,
+    TextColor3=T.Green, Font=Enum.Font.Gotham, TextSize=9,
+    TextXAlignment=Enum.TextXAlignment.Left,
+},ProfileSection)
+
+-- Sidebar scroll (below profile)
+local SideScroll = New("ScrollingFrame",{
+    Size=UDim2.new(1,0,1,-82),
+    Position=UDim2.new(0,0,0,82),
+    BackgroundTransparency=1, BorderSizePixel=0,
+    ScrollBarThickness=0,
+    CanvasSize=UDim2.new(0,0,0,0),
+    AutomaticCanvasSize=Enum.AutomaticSize.Y,
+},Sidebar)
+VList(1,SideScroll)
+Pad(6,6,6,6,SideScroll)
+
+-- ============================================================
+--  Content Area
+-- ============================================================
+local ContentFrame = New("Frame",{
+    Size=UDim2.new(1,-SIDEBAR_W,1,-HEADER_H),
+    Position=UDim2.new(0,SIDEBAR_W,0,HEADER_H),
+    BackgroundColor3=T.Panel, BorderSizePixel=0,
+},WinClip)
+
+local ContentScroll = New("ScrollingFrame",{
+    Size=UDim2.new(1,0,1,0),
+    BackgroundTransparency=1, BorderSizePixel=0,
+    ScrollBarThickness=3,
+    ScrollBarImageColor3=Color3.fromRGB(60,60,60),
+    ScrollBarImageTransparency=0.3,
+    CanvasSize=UDim2.new(0,0,0,0),
+    AutomaticCanvasSize=Enum.AutomaticSize.Y,
+},ContentFrame)
+local ContentList = VList(4,ContentScroll)
+ContentList.SortOrder=Enum.SortOrder.LayoutOrder
+Pad(10,14,10,10,ContentScroll)
+
+-- ============================================================
+--  Global Dropdown
+-- ============================================================
+local DropMenu = New("Frame",{
+    Size=UDim2.new(0,200,0,200), Position=UDim2.new(0,0,0,0),
+    BackgroundColor3=Color3.fromRGB(18,18,18),
+    BorderSizePixel=0, Visible=false, ZIndex=9000,
+    ClipsDescendants=true,
+},ScreenGui)
+Rnd(8,DropMenu)
+Stroke(Color3.fromRGB(50,50,50),1,DropMenu)
+
+local DropScroll = New("ScrollingFrame",{
+    Size=UDim2.new(1,0,1,0), BackgroundTransparency=1,
+    BorderSizePixel=0, ScrollBarThickness=2,
+    ScrollBarImageColor3=Color3.fromRGB(80,80,80),
+    CanvasSize=UDim2.new(0,0,0,0), AutomaticCanvasSize=Enum.AutomaticSize.Y,
+    ZIndex=9001,
+},DropMenu)
+VList(1,DropScroll)
+Pad(4,4,4,4,DropScroll)
+
+local ActiveDropCallback = nil
+local ActiveDropSelLabel = nil
+
+local function CloseDropdown()
+    DropMenu.Visible=false; ActiveDropCallback=nil; ActiveDropSelLabel=nil
+    for _, c in ipairs(DropScroll:GetChildren()) do
+        if not c:IsA("UIListLayout") and not c:IsA("UIPadding") then c:Destroy() end
+    end
+end
+
+ScreenGui.InputBegan:Connect(function(inp)
+    if inp.UserInputType==Enum.UserInputType.MouseButton1 and DropMenu.Visible then
+        local mx,my=inp.Position.X,inp.Position.Y
+        local dx,dy=DropMenu.AbsolutePosition.X,DropMenu.AbsolutePosition.Y
+        local dw,dh=DropMenu.AbsoluteSize.X,DropMenu.AbsoluteSize.Y
+        if mx<dx or mx>dx+dw or my<dy or my>dy+dh then CloseDropdown() end
+    end
+end)
+
+local function OpenDropdown(triggerFrame, options, selLabel, callback)
+    CloseDropdown()
+    ActiveDropSelLabel=selLabel; ActiveDropCallback=callback
+    for _, opt in ipairs(options) do
+        local btn=New("TextButton",{
+            Text="  "..opt,
+            Size=UDim2.new(1,0,0,26),
+            BackgroundColor3=Color3.fromRGB(22,22,22),
+            TextColor3=T.TextSub, Font=Enum.Font.Gotham, TextSize=11,
+            BorderSizePixel=0, AutoButtonColor=false, ZIndex=9002,
+            TextXAlignment=Enum.TextXAlignment.Left,
+        },DropScroll)
+        Rnd(5,btn)
+        btn.MouseEnter:Connect(function() Tween(btn,{BackgroundColor3=Color3.fromRGB(35,35,35),TextColor3=T.Text}) end)
+        btn.MouseLeave:Connect(function() Tween(btn,{BackgroundColor3=Color3.fromRGB(22,22,22),TextColor3=T.TextSub}) end)
+        btn.MouseButton1Click:Connect(function()
+            if ActiveDropSelLabel then ActiveDropSelLabel.Text=opt end
+            local cb=ActiveDropCallback; CloseDropdown(); if cb then cb(opt) end
+        end)
+    end
+    local count=math.min(#options,8)
+    local menuH=count*27+10
+    local menuW=math.max(170,triggerFrame.AbsoluteSize.X)
+    DropMenu.Size=UDim2.new(0,menuW,0,menuH)
+    local px=triggerFrame.AbsolutePosition.X
+    local py=triggerFrame.AbsolutePosition.Y+triggerFrame.AbsoluteSize.Y+4
+    local sw=ScreenGui.AbsoluteSize.X; local sh=ScreenGui.AbsoluteSize.Y
+    if px+menuW>sw-8 then px=sw-menuW-8 end
+    if py+menuH>sh-8 then py=triggerFrame.AbsolutePosition.Y-menuH-4 end
+    DropMenu.Position=UDim2.new(0,px,0,py)
+    DropMenu.Visible=true
+end
+
+-- ============================================================
+--  Tab System
+-- ============================================================
+local TabButtons = {}
+local TabContent = {}
+local ActiveTab  = nil
+
+local TABS = {
+    {id="Home",     icon="⌂",  label="Home"},
+    {id="Player",   icon="◉",  label="Player"},
+    {id="Visuals",  icon="✦",  label="Visuals"},
+    {id="Weather",  icon="☁",  label="Weather"},
+    {id="Skybox",   icon="◈",  label="Skybox"},
+    {id="Effects",  icon="◇",  label="Effects"},
+    {id="ESP",      icon="◎",  label="ESP"},
+    {id="World",    icon="⬡",  label="World"},
+    {id="Utility",  icon="⚙",  label="Utility"},
+    {id="Sound",    icon="♪",  label="Sound"},
+    {id="Settings", icon="≡",  label="Settings"},
+}
+
+local _FPS_Labels  = {}
+local _Ping_Labels = {}
+
+local function ClearContent()
+    CloseDropdown()
+    _FPS_Labels  = {}
+    _Ping_Labels = {}
+    for _, c in ipairs(ContentScroll:GetChildren()) do
+        if not c:IsA("UIListLayout") and not c:IsA("UIPadding") then c:Destroy() end
+    end
+    ContentScroll.CanvasPosition=Vector2.new(0,0)
+end
+
+local function SwitchTab(id)
+    if ActiveTab==id then return end
+    ActiveTab=id
+    ClearContent()
+    for n, btn in pairs(TabButtons) do
+        if n==id then
+            btn.BackgroundTransparency=0
+            Tween(btn,{BackgroundColor3=T.TabActive,TextColor3=T.Text})
+        else
+            Tween(btn,{BackgroundColor3=Color3.fromRGB(0,0,0),TextColor3=T.TextMuted})
+            btn.BackgroundTransparency=1
+        end
+    end
+    if TabContent[id] then TabContent[id]() end
+end
+
+for _, tab in ipairs(TABS) do
+    local btn=New("TextButton",{
+        Text=tab.icon.."  "..tab.label,
+        Size=UDim2.new(1,0,0,32),
+        BackgroundColor3=Color3.fromRGB(0,0,0), BackgroundTransparency=1,
+        TextColor3=T.TextMuted,
+        Font=Enum.Font.GothamSemibold, TextSize=12,
+        BorderSizePixel=0, AutoButtonColor=false,
+        TextXAlignment=Enum.TextXAlignment.Left,
+    },SideScroll)
+    Rnd(7,btn)
+    Pad(0,0,10,8,btn)
+    btn.MouseEnter:Connect(function()
+        if ActiveTab~=tab.id then
+            btn.BackgroundTransparency=0
+            Tween(btn,{BackgroundColor3=Color3.fromRGB(25,25,25),TextColor3=T.TextSub})
+        end
+    end)
+    btn.MouseLeave:Connect(function()
+        if ActiveTab~=tab.id then
+            Tween(btn,{BackgroundColor3=Color3.fromRGB(0,0,0)})
+            btn.BackgroundTransparency=1
+        end
+    end)
+    btn.MouseButton1Click:Connect(function() SwitchTab(tab.id) end)
+    TabButtons[tab.id]=btn
+    TabContent[tab.id]=function() end
+end
+
+-- ============================================================
+--  UI Component Builders
+-- ============================================================
+
+local _layoutOrder = 0
+local function nextOrder()
+    _layoutOrder=_layoutOrder+1
+    return _layoutOrder
+end
+
+local function Section(title)
+    local f=New("Frame",{
+        Size=UDim2.new(1,0,0,22),
+        BackgroundTransparency=1,
+        LayoutOrder=nextOrder(),
+    },ContentScroll)
+    New("Frame",{Size=UDim2.new(1,0,0,1),Position=UDim2.new(0,0,0.5,0),BackgroundColor3=T.Border,BorderSizePixel=0},f)
+    local pill=New("Frame",{
+        Size=UDim2.new(0,0,0,16),Position=UDim2.new(0,0,0.5,-8),
+        BackgroundColor3=T.Card, BorderSizePixel=0, AutomaticSize=Enum.AutomaticSize.X,
+    },f)
+    Rnd(4,pill); Pad(0,0,8,10,pill)
+    New("TextLabel",{
+        Text=title:upper(),
+        Size=UDim2.new(0,0,1,0), AutomaticSize=Enum.AutomaticSize.X,
+        BackgroundTransparency=1,
+        TextColor3=T.AccentDim, Font=Enum.Font.GothamBold, TextSize=9,
+        TextXAlignment=Enum.TextXAlignment.Left,
+    },pill)
+end
+
+local function Toggle(label, default, callback)
+    local state=default or false
+    local card=New("Frame",{
+        Size=UDim2.new(1,0,0,40),
+        BackgroundColor3=T.Card, BorderSizePixel=0,
+        LayoutOrder=nextOrder(),
+    },ContentScroll)
+    Rnd(8,card); Stroke(T.Border,1,card); Pad(0,0,12,12,card)
+
+    New("TextLabel",{
+        Text=label, Size=UDim2.new(1,-58,1,0),
+        BackgroundTransparency=1,
+        TextColor3=T.Text, Font=Enum.Font.Gotham, TextSize=12,
+        TextXAlignment=Enum.TextXAlignment.Left,
+    },card)
+
+    local track=New("Frame",{
+        Size=UDim2.new(0,40,0,20), Position=UDim2.new(1,-44,0.5,-10),
+        BackgroundColor3=state and T.Accent or T.ToggleOff, BorderSizePixel=0,
+    },card)
+    Rnd(10,track)
+
+    local knob=New("Frame",{
+        Size=UDim2.new(0,14,0,14),
+        Position=state and UDim2.new(1,-17,0.5,-7) or UDim2.new(0,3,0.5,-7),
+        BackgroundColor3=state and T.BG or T.TextMuted, BorderSizePixel=0,
+    },track)
+    Rnd(7,knob)
+
+    local function Update(s)
+        state=s
+        Tween(track,{BackgroundColor3=s and T.Accent or T.ToggleOff})
+        Tween(knob,{Position=s and UDim2.new(1,-17,0.5,-7) or UDim2.new(0,3,0.5,-7),
+                    BackgroundColor3=s and T.BG or T.TextMuted})
+        callback(s)
+    end
+
+    local hitbox=New("TextButton",{Text="",Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,ZIndex=5},card)
+    hitbox.MouseButton1Click:Connect(function() Update(not state) end)
+    card.MouseEnter:Connect(function() Tween(card,{BackgroundColor3=T.CardHov}) end)
+    card.MouseLeave:Connect(function() Tween(card,{BackgroundColor3=T.Card}) end)
+
+    return {SetValue=function(v) Update(v) end, GetValue=function() return state end}
+end
+
+local function Slider(label, mn, mx, default, inc, callback)
+    local val=default or mn
+    local card=New("Frame",{
+        Size=UDim2.new(1,0,0,58),
+        BackgroundColor3=T.Card, BorderSizePixel=0,
+        LayoutOrder=nextOrder(),
+    },ContentScroll)
+    Rnd(8,card); Stroke(T.Border,1,card); Pad(8,9,12,12,card); VList(5,card)
+
+    local topRow=New("Frame",{Size=UDim2.new(1,0,0,13),BackgroundTransparency=1},card)
+    New("TextLabel",{
+        Text=label, Size=UDim2.new(0.75,0,1,0),
+        BackgroundTransparency=1,
+        TextColor3=T.TextSub, Font=Enum.Font.Gotham, TextSize=11,
+        TextXAlignment=Enum.TextXAlignment.Left,
+    },topRow)
+    local badge=New("Frame",{
+        Size=UDim2.new(0,48,0,14), Position=UDim2.new(1,-48,0,0),
+        BackgroundColor3=Color3.fromRGB(22,22,22), BorderSizePixel=0,
+    },topRow)
+    Rnd(4,badge)
+    local valLbl=New("TextLabel",{
+        Text=tostring(val), Size=UDim2.new(1,0,1,0),
+        BackgroundTransparency=1,
+        TextColor3=T.Text, Font=Enum.Font.GothamBold, TextSize=10,
+        TextXAlignment=Enum.TextXAlignment.Center,
+    },badge)
+
+    local trackBG=New("Frame",{
+        Size=UDim2.new(1,0,0,5), BackgroundColor3=T.SliderBG, BorderSizePixel=0,
+    },card)
+    Rnd(3,trackBG)
+    local fill=New("Frame",{
+        Size=UDim2.new((val-mn)/(mx-mn),0,1,0),
+        BackgroundColor3=T.Accent, BorderSizePixel=0,
+    },trackBG)
+    Rnd(3,fill)
+    local ratio0=(val-mn)/(mx-mn)
+    local thumb=New("Frame",{
+        Size=UDim2.new(0,11,0,11), Position=UDim2.new(ratio0,-5.5,0.5,-5.5),
+        BackgroundColor3=T.Text, BorderSizePixel=0, ZIndex=2,
+    },trackBG)
+    Rnd(6,thumb)
+
+    local sliding=false
+    local function UpdateSlider(x)
+        local rel=math.clamp((x-trackBG.AbsolutePosition.X)/trackBG.AbsoluteSize.X,0,1)
+        local raw=mn+(mx-mn)*rel
+        local snapped=math.clamp(math.floor(raw/inc+0.5)*inc,mn,mx)
+        val=snapped
+        local t=(val-mn)/(mx-mn)
+        fill.Size=UDim2.new(t,0,1,0)
+        thumb.Position=UDim2.new(t,-5.5,0.5,-5.5)
+        valLbl.Text=tostring(math.floor(val*100+0.5)/100)
+        callback(val)
+    end
+    trackBG.InputBegan:Connect(function(i)
+        if i.UserInputType==Enum.UserInputType.MouseButton1 then sliding=true; UpdateSlider(i.Position.X) end
+    end)
+    UserInputService.InputChanged:Connect(function(i)
+        if sliding and i.UserInputType==Enum.UserInputType.MouseMovement then UpdateSlider(i.Position.X) end
+    end)
+    UserInputService.InputEnded:Connect(function(i)
+        if i.UserInputType==Enum.UserInputType.MouseButton1 then sliding=false end
+    end)
+    card.MouseEnter:Connect(function() Tween(card,{BackgroundColor3=T.CardHov}) end)
+    card.MouseLeave:Connect(function() Tween(card,{BackgroundColor3=T.Card}) end)
+end
+
+local function Button(label, callback, color)
+    local bg=color or Color3.fromRGB(32,32,32)
+    local btn=New("TextButton",{
+        Text=label, Size=UDim2.new(1,0,0,36),
+        BackgroundColor3=bg, TextColor3=T.Text,
+        Font=Enum.Font.GothamSemibold, TextSize=12,
+        BorderSizePixel=0, AutoButtonColor=false,
+        LayoutOrder=nextOrder(),
+    },ContentScroll)
+    Rnd(8,btn)
+    Stroke(T.Border,1,btn)
+    btn.MouseEnter:Connect(function() Tween(btn,{BackgroundColor3=Color3.fromRGB(bg.R*255+12,bg.G*255+12,bg.B*255+12)}) end)
+    btn.MouseLeave:Connect(function() Tween(btn,{BackgroundColor3=bg}) end)
+    btn.MouseButton1Click:Connect(function()
+        Tween(btn,{BackgroundColor3=Color3.fromRGB(60,60,60)},0.05)
+        task.delay(0.08,function() Tween(btn,{BackgroundColor3=bg},0.1) end)
+        callback()
+    end)
+    return btn
+end
+
+local function Dropdown(label, options, default, callback)
+    local selected=default or options[1]
+    local card=New("Frame",{
+        Size=UDim2.new(1,0,0,40),
+        BackgroundColor3=T.Card, BorderSizePixel=0,
+        LayoutOrder=nextOrder(),
+    },ContentScroll)
+    Rnd(8,card); Stroke(T.Border,1,card); Pad(0,0,12,12,card)
+
+    New("TextLabel",{
+        Text=label, Size=UDim2.new(0.44,0,1,0),
+        BackgroundTransparency=1,
+        TextColor3=T.TextSub, Font=Enum.Font.Gotham, TextSize=11,
+        TextXAlignment=Enum.TextXAlignment.Left,
+    },card)
+
+    local selRow=New("Frame",{
+        Size=UDim2.new(0.56,-4,0,26), Position=UDim2.new(0.44,0,0.5,-13),
+        BackgroundColor3=Color3.fromRGB(22,22,22), BorderSizePixel=0,
+    },card)
+    Rnd(6,selRow); Stroke(T.Border,1,selRow); Pad(0,0,9,8,selRow)
+
+    local selLbl=New("TextLabel",{
+        Text=selected, Size=UDim2.new(1,-14,1,0),
+        BackgroundTransparency=1,
+        TextColor3=T.Text, Font=Enum.Font.GothamSemibold, TextSize=11,
+        TextXAlignment=Enum.TextXAlignment.Left,
+    },selRow)
+    New("TextLabel",{
+        Text="▾", Size=UDim2.new(0,13,1,0), Position=UDim2.new(1,-13,0,0),
+        BackgroundTransparency=1,
+        TextColor3=T.TextMuted, Font=Enum.Font.GothamBold, TextSize=10,
+    },selRow)
+
+    local tog=New("TextButton",{Text="",Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,ZIndex=5},card)
+    tog.MouseButton1Click:Connect(function()
+        if DropMenu.Visible and ActiveDropSelLabel==selLbl then CloseDropdown()
+        else OpenDropdown(card,options,selLbl,function(v) selected=v; callback(v) end) end
+    end)
+    card.MouseEnter:Connect(function() Tween(card,{BackgroundColor3=T.CardHov}) end)
+    card.MouseLeave:Connect(function() Tween(card,{BackgroundColor3=T.Card}) end)
+end
+
+local function InfoCard(title, content, accent)
+    local ac=accent or T.AccentDim
+    local card=New("Frame",{
+        Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y,
+        BackgroundColor3=T.Card, BorderSizePixel=0,
+        LayoutOrder=nextOrder(),
+    },ContentScroll)
+    Rnd(8,card); Stroke(T.Border,1,card); Pad(10,10,14,12,card); VList(4,card)
+    New("TextLabel",{
+        Text=title, Size=UDim2.new(1,0,0,14),
+        BackgroundTransparency=1,
+        TextColor3=ac, Font=Enum.Font.GothamBold, TextSize=11,
+        TextXAlignment=Enum.TextXAlignment.Left,
+    },card)
+    local lbl=New("TextLabel",{
+        Text=content, Size=UDim2.new(1,0,0,0), AutomaticSize=Enum.AutomaticSize.Y,
+        BackgroundTransparency=1,
+        TextColor3=T.TextSub, Font=Enum.Font.Gotham, TextSize=10,
+        TextXAlignment=Enum.TextXAlignment.Left, TextWrapped=true,
+    },card)
+    return lbl
+end
+
+local function ColorPicker(label, callback)
+    local colors={
+        Red=Color3.fromRGB(255,60,60), Orange=Color3.fromRGB(255,140,0),
+        Yellow=Color3.fromRGB(255,230,0), Green=Color3.fromRGB(50,225,90),
+        Cyan=Color3.fromRGB(0,220,220), Blue=Color3.fromRGB(50,130,255),
+        Purple=Color3.fromRGB(150,60,255), Violet=Color3.fromRGB(200,80,255),
+        Pink=Color3.fromRGB(255,80,200), White=Color3.fromRGB(255,255,255),
+        Gold=Color3.fromRGB(220,168,32), Lime=Color3.fromRGB(100,255,0),
+        Teal=Color3.fromRGB(0,200,185), Crimson=Color3.fromRGB(220,20,60),
+        Sky=Color3.fromRGB(50,180,255),
+    }
+    local opts={}; for k in pairs(colors) do table.insert(opts,k) end; table.sort(opts)
+    Dropdown(label,opts,"White",function(v) callback(colors[v]) end)
+end
+
+local function LiveStatRow()
+    local row=New("Frame",{
+        Size=UDim2.new(1,0,0,54), BackgroundTransparency=1,
+        LayoutOrder=nextOrder(),
+    },ContentScroll)
+    HList(6,row)
+    local function mkCard(lbl,col)
+        local c=New("Frame",{
+            Size=UDim2.new(0.5,-3,1,0),
+            BackgroundColor3=T.Card, BorderSizePixel=0,
+        },row)
+        Rnd(8,c); Stroke(T.Border,1,c); Pad(8,8,12,12,c); VList(2,c)
+        local vl=New("TextLabel",{
+            Text="—", Size=UDim2.new(1,0,0,20),
+            BackgroundTransparency=1,
+            TextColor3=col, Font=Enum.Font.GothamBold, TextSize=16,
+            TextXAlignment=Enum.TextXAlignment.Left,
+        },c)
+        New("TextLabel",{
+            Text=lbl, Size=UDim2.new(1,0,0,11),
+            BackgroundTransparency=1,
+            TextColor3=T.TextMuted, Font=Enum.Font.Gotham, TextSize=9,
+            TextXAlignment=Enum.TextXAlignment.Left,
+        },c)
+        return vl
+    end
+    table.insert(_FPS_Labels,  mkCard("FPS",  T.Green))
+    table.insert(_Ping_Labels, mkCard("PING", T.Blue))
+end
+
+-- ============================================================
+--  RESET order counter each tab build
+-- ============================================================
+local function ResetOrder() _layoutOrder=0 end
+
+-- ============================================================
+--  TAB CONTENT
+-- ============================================================
+
+-- HOME
+TabContent["Home"] = function()
+    ResetOrder()
+    LiveStatRow()
+    Section("Quick Toggles")
+    Toggle("⚡  Fly Mode",      false, function(v) FlyEnabled=v end)
+    Toggle("↑  Infinite Jump",  false, function(v) InfiniteJump=v end)
+    Toggle("◌  Noclip",         false, function(v) Noclip=v end)
+    Toggle("♥  God Mode",       false, function(v) GodModeEnabled=v end)
+    Toggle("☄  Meteor Shower",  false, function(v) MeteorEnabled=v end)
+    Toggle("☁  Weather Active", false, function(v) if not v then SetWeather("Clear") end end)
+    Section("Info")
+    InfoCard("Controls",
+        "M key → Toggle UI visibility\n— button → Minimize window\n"..
+        "Fly: WASD + Space (up) + LShift (down)\nAll features run when UI is hidden.")
+    InfoCard("World Script v5.0", "Dark rewrite — all features fixed and working.", T.AccentDim)
+end
+
+-- PLAYER
+TabContent["Player"] = function()
+    ResetOrder()
+    Section("Movement")
+    Slider("Walk Speed",    0,500,16,1, function(v)
+        local h=LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid")
+        if h then h.WalkSpeed=v end
+    end)
+    Slider("Jump Power",    0,400,50,1, function(v)
+        local h=LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid")
+        if h then h.JumpPower=v end
+    end)
+    Slider("Gravity",       0,600,196,1, function(v) workspace.Gravity=v end)
+    Toggle("Infinite Jump", false, function(v) InfiniteJump=v end)
+    Toggle("Noclip",        false, function(v) Noclip=v end)
+    Toggle("Anti Fall Damage",false,function(v)
+        if v and LocalPlayer.Character then
+            local h=LocalPlayer.Character:FindFirstChild("Humanoid")
+            if h then h:SetStateEnabled(Enum.HumanoidStateType.FallingDown,false) end
+        end
+    end)
+    Section("Flight")
+    Toggle("Fly Enabled", false, function(v) FlyEnabled=v end)
+    Slider("Fly Speed",   10,800,50,5, function(v) FlySpeed=v end)
+    Section("Character")
+    Toggle("God Mode",  false, function(v) GodModeEnabled=v end)
+    Toggle("Headless",  false, function(v)
+        HeadlessEnabled=v
+        local c=LocalPlayer.Character; if not c then return end
+        local hd=c:FindFirstChild("Head"); if not hd then return end
+        hd.Transparency=v and 1 or 0
+        local f=hd:FindFirstChild("face"); if f then f.Transparency=v and 1 or 0 end
+    end)
+    Toggle("Invisible", false, function(v)
+        InvisEnabled=v
+        local c=LocalPlayer.Character; if not c then return end
+        for _, p in ipairs(c:GetDescendants()) do
+            if p:IsA("BasePart") or p:IsA("Decal") then p.Transparency=v and 1 or 0 end
+        end
+    end)
+    Toggle("Slippery Mode", false, function(v) SlipperyEnabled=v end)
+    Section("Cosmetics")
+    Toggle("Character Trail", false, function(v)
+        TrailEnabled=v
+        local c=LocalPlayer.Character; if not c then return end
+        local root=c:FindFirstChild("HumanoidRootPart"); local head=c:FindFirstChild("Head")
+        if root and head then
+            if v then
+                local a0=Instance.new("Attachment",root); a0.Name="TrAtt0"
+                local a1=Instance.new("Attachment",head);  a1.Name="TrAtt1"
+                local tr=Instance.new("Trail")
+                tr.Attachment0=a0; tr.Attachment1=a1; tr.Lifetime=0.9
+                tr.Color=ColorSequence.new({
+                    ColorSequenceKeypoint.new(0,  Color3.fromRGB(_G.TrailR or 200,_G.TrailG or 80,_G.TrailB or 255)),
+                    ColorSequenceKeypoint.new(0.5,Color3.fromRGB(100,40,220)),
+                    ColorSequenceKeypoint.new(1,  Color3.fromRGB(50,0,140)),
+                })
+                tr.Transparency=NumberSequence.new({NumberSequenceKeypoint.new(0,0),NumberSequenceKeypoint.new(1,1)})
+                tr.WidthScale=NumberSequence.new(1,0); tr.Parent=c; tr.Name="WSTrail"
+            else
+                for _, n in ipairs({"WSTrail","TrAtt0","TrAtt1"}) do
+                    local f=c:FindFirstChild(n) or root:FindFirstChild(n) or head:FindFirstChild(n)
+                    if f then f:Destroy() end
+                end
+            end
+        end
+    end)
+    Toggle("Body Aura", false, function(v)
+        AuraEnabled=v
+        local c=LocalPlayer.Character; if not c then return end
+        local root=c:FindFirstChild("HumanoidRootPart"); if not root then return end
+        if v then
+            local part=Instance.new("Part"); part.Size=Vector3.new(4,5,4)
+            part.Anchored=false; part.CanCollide=false; part.Transparency=1
+            part.Name="WSAura"; part.Parent=c
+            local w=Instance.new("WeldConstraint"); w.Part0=root; w.Part1=part; w.Parent=part
+            local em=Instance.new("ParticleEmitter")
+            em.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,Color3.fromRGB(200,200,200)),ColorSequenceKeypoint.new(1,Color3.fromRGB(100,100,100))})
+            em.LightEmission=0.5; em.Rate=30; em.Lifetime=NumberRange.new(0.5,1.2)
+            em.Speed=NumberRange.new(2,5); em.SpreadAngle=Vector2.new(180,180); em.Parent=part
+        else
+            local f=c:FindFirstChild("WSAura"); if f then f:Destroy() end
+        end
+    end)
+    Toggle("Ground Smoke Trail", false, function(v) GroundTrailEnabled=v end)
+    Section("Trail Color")
+    Slider("Red",   0,255,200,1, function(v) _G.TrailR=v end)
+    Slider("Green", 0,255, 80,1, function(v) _G.TrailG=v end)
+    Slider("Blue",  0,255,255,1, function(v) _G.TrailB=v end)
+    Button("Reset Character", function()
+        local h=LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid")
+        if h then h.Health=0 end
+    end, T.Red)
+end
+
+-- VISUALS
+TabContent["Visuals"] = function()
+    ResetOrder()
+    Section("Camera")
+    Slider("Field of View", 30,140,70,1, function(v) Camera.FieldOfView=v end)
+    Section("Bloom")
+    Toggle("Bloom Enabled",  false, function(v) BloomEffect.Enabled=v end)
+    Slider("Intensity",      0,5,  1,   0.1,  function(v) BloomEffect.Intensity=v  end)
+    Slider("Size",           1,56, 24,  1,    function(v) BloomEffect.Size=v        end)
+    Slider("Threshold",      0,1,  0.95,0.05, function(v) BloomEffect.Threshold=v  end)
+    Section("Sun Rays")
+    Toggle("Sun Rays Enabled", false, function(v) SunRays.Enabled=v end)
+    Slider("Intensity",        0,1,0.25,0.05, function(v) SunRays.Intensity=v end)
+    Slider("Spread",           0,1,0.5, 0.05, function(v) SunRays.Spread=v    end)
+    Section("Depth of Field")
+    Toggle("Depth of Field", false, function(v) DOF.Enabled=v end)
+    Slider("Focus Distance", 5,300,50,  1,    function(v) DOF.FocusDistance=v end)
+    Slider("Far Intensity",  0,1,  0.5, 0.05, function(v) DOF.FarIntensity=v  end)
+    Slider("Near Intensity", 0,1,  0.5, 0.05, function(v) DOF.NearIntensity=v end)
+    Section("Motion Blur")
+    Toggle("Motion Blur",   false, function(v) MotionBlur.Enabled=v end)
+    Slider("Blur Size",     0,56,10,1, function(v) MotionBlur.Size=v end)
+    Section("Color Grading")
+    Toggle("Color Correction", false, function(v) ColorCorrection.Enabled=v end)
+    Slider("Saturation", -2,2, 0, 0.1,  function(v) ColorCorrection.Saturation=v end)
+    Slider("Brightness", -1,1, 0, 0.05, function(v) ColorCorrection.Brightness=v end)
+    Slider("Contrast",   -1,1, 0, 0.05, function(v) ColorCorrection.Contrast=v   end)
+    Slider("Tint Red",   0,255,255,1, function(v) local c=ColorCorrection.TintColor; ColorCorrection.TintColor=Color3.fromRGB(v,c.G*255,c.B*255) end)
+    Slider("Tint Green", 0,255,255,1, function(v) local c=ColorCorrection.TintColor; ColorCorrection.TintColor=Color3.fromRGB(c.R*255,v,c.B*255) end)
+    Slider("Tint Blue",  0,255,255,1, function(v) local c=ColorCorrection.TintColor; ColorCorrection.TintColor=Color3.fromRGB(c.R*255,c.G*255,v) end)
+end
+
+-- WEATHER
+TabContent["Weather"] = function()
+    ResetOrder()
+    Section("Weather Preset")
+    Dropdown("Active Weather",{
+        "Clear","Sunny","PartlyCloudy","Cloudy","Overcast","Rainy","Stormy",
+        "Snowy","Blizzard","Foggy","Hot","Cold","Windy","Hurricane","Tornado",
+    },"Clear",function(v) SetWeather(v) end)
+    Section("Particle Settings")
+    Slider("Density",        1,20,5,  1, function(v) _G.WeatherDensity=v end)
+    Slider("Wind Strength",  0,80,10, 1, function(v) _G.WindStrength=v   end)
+    Slider("Wind Direction", 0,360,0, 5, function(v) _G.WindDirection=v  end)
+    Section("Thunder & Lightning")
+    Toggle("Thunder Override",  false, function(v) ThunderEnabled=v end)
+    Slider("Strike Interval",   1,20,5,0.5, function(v) _G.ThunderInterval=v end)
+    Button("⚡ Strike Now!", function()
+        local ob=Lighting.Brightness
+        Lighting.Brightness=6
+        task.delay(0.06,function() Lighting.Brightness=ob   end)
+        task.delay(0.14,function() Lighting.Brightness=5.5  end)
+        task.delay(0.22,function() Lighting.Brightness=ob   end)
+        local s=Instance.new("Sound",workspace); s.SoundId="rbxassetid://130758378"; s.Volume=1; s:Play()
+        Debris:AddItem(s,5)
+    end, Color3.fromRGB(35,35,35))
+    Section("Meteor Shower")
+    Toggle("Meteors Enabled",  false, function(v) MeteorEnabled=v end)
+    Slider("Meteor Size",      0.5,15,3,  0.5, function(v) MeteorSize=v  end)
+    Slider("Meteor Speed",     20,400,80, 5,   function(v) MeteorSpeed=v end)
+    Slider("Rate per Second",  0.1,12,0.5,0.1, function(v) MeteorRate=v  end)
+    Dropdown("Meteor Type",{
+        "Asteroid","Fire Meteor","Ice Comet","Purple Stone","Gold Rock","Dark Obsidian","Lava Rock",
+    },"Asteroid",function(v)
+        local rock={Asteroid=Color3.fromRGB(115,98,78),["Fire Meteor"]=Color3.fromRGB(185,75,25),["Ice Comet"]=Color3.fromRGB(145,215,255),["Purple Stone"]=Color3.fromRGB(130,50,210),["Gold Rock"]=Color3.fromRGB(210,175,40),["Dark Obsidian"]=Color3.fromRGB(38,35,40),["Lava Rock"]=Color3.fromRGB(175,40,15)}
+        local fire={Asteroid=Color3.fromRGB(255,145,45),["Fire Meteor"]=Color3.fromRGB(255,55,0),["Ice Comet"]=Color3.fromRGB(80,185,255),["Purple Stone"]=Color3.fromRGB(200,80,255),["Gold Rock"]=Color3.fromRGB(255,225,55),["Dark Obsidian"]=Color3.fromRGB(255,90,0),["Lava Rock"]=Color3.fromRGB(255,80,0)}
+        _G.MeteorColor=rock[v]; _G.MeteorFireColor=fire[v]
+    end)
+    Toggle("Impact Explosions",  true,  function(v) _G.MeteorExplosions=v end)
+    Slider("Explosion Radius",   1,25,5,0.5, function(v) _G.MeteorExplosionRadius=v end)
+    Button("✕ Clear All Weather", function() SetWeather("Clear") end, Color3.fromRGB(35,35,35))
+end
+
+-- SKYBOX
+TabContent["Skybox"] = function()
+    ResetOrder()
+    Section("Preset")
+    local skyNames={}; for k in pairs(SkyboxPresets) do table.insert(skyNames,k) end; table.sort(skyNames)
+    Dropdown("Active Preset", skyNames, "Default", function(v) ApplySkybox(v) end)
+    Section("Skybox Spin")
+    Toggle("Enable Spin",  false, function(v) SkyboxSpinEnabled=v end)
+    Slider("Spin Speed",   0.05,30,1,0.05, function(v) SkyboxSpinSpeed=v end)
+    Dropdown("Spin Mode",{"Horizontal (Sun Arc)","Latitude Drift"},"Horizontal (Sun Arc)",function(v)
+        _G.SkyboxSpinAxis=v=="Latitude Drift" and "Latitude" or "Horizontal"
+    end)
+    Section("Sky Properties")
+    Slider("Star Count", 0,5000,3000,100, function(v) Sky.StarCount=v       end)
+    Slider("Sun Size",   1,100, 21,  1,   function(v) Sky.SunAngularSize=v  end)
+    Slider("Moon Size",  1,100, 11,  1,   function(v) Sky.MoonAngularSize=v end)
+    Section("Manual Lighting")
+    Slider("Brightness",   0,10, 2,   0.1,  function(v) Lighting.Brightness=v        end)
+    Slider("Time of Day",  0,24, 14,  0.25, function(v) Lighting.ClockTime=v         end)
+    Slider("Geo Latitude",-90,90,41,  1,    function(v) Lighting.GeographicLatitude=v end)
+    Section("Day / Night Cycle")
+    Toggle("Auto Day Cycle",  false, function(v) DayCycleEnabled=v end)
+    Slider("Cycle Speed",     0.01,5,0.1,0.01, function(v) _G.DayCycleSpeed=v end)
+    Section("Dynamic Lighting")
+    Toggle("Rainbow Ambient",   false, function(v) RainbowLighting=v end)
+    Slider("Rainbow Speed",     0.01,1,0.08,0.01, function(v) _G.RainbowSpeed=v end)
+    Toggle("Flickering Lights", false, function(v) FlickerLights=v end)
+    Slider("Flicker Intensity", 0.1,8,2,0.1, function(v) _G.FlickerIntensity=v end)
+    Slider("Ambient R", 0,255,70,1, function(v) local a=Lighting.Ambient; Lighting.Ambient=Color3.fromRGB(v,a.G*255,a.B*255) end)
+    Slider("Ambient G", 0,255,70,1, function(v) local a=Lighting.Ambient; Lighting.Ambient=Color3.fromRGB(a.R*255,v,a.B*255) end)
+    Slider("Ambient B", 0,255,70,1, function(v) local a=Lighting.Ambient; Lighting.Ambient=Color3.fromRGB(a.R*255,a.G*255,v) end)
+end
+
+-- EFFECTS
+TabContent["Effects"] = function()
+    ResetOrder()
+    Section("Aurora Borealis")
+    Toggle("Aurora Effect", false, function(v)
+        AuroraEnabled=v
+        if v then
+            Lighting.FogColor=_G.AuroraColor or Color3.fromRGB(0,200,150)
+            Lighting.Ambient=Color3.fromRGB(0,60,80); Lighting.FogEnd=650
+        elseif not WeatherEnabled then
+            Lighting.FogColor=OriginalLighting.FogColor
+            Lighting.Ambient=OriginalLighting.Ambient; Lighting.FogEnd=OriginalLighting.FogEnd
+        end
+    end)
+    ColorPicker("Aurora Color", function(c) _G.AuroraColor=c; if AuroraEnabled then Lighting.FogColor=c end end)
+    Section("Ground Particles")
+    Toggle("Ground Smoke",  false, function(v) GroundTrailEnabled=v end)
+    Slider("Smoke Density", 1,15,3,0.5, function(v) _G.SmokeDensity=v end)
+    Section("Fog")
+    Slider("Fog End",   10,3000,1000,10, function(v) Lighting.FogEnd=v; Lighting.FogStart=math.max(0,v*0.04) end)
+    Slider("Fog Start",  0,500,   0,  5, function(v) Lighting.FogStart=v end)
+    Dropdown("Fog Color",{
+        "Default","Crimson","Emerald","Sapphire","Violet","Amber","Obsidian","Pearl","Rose","Jade","Toxic","Blood",
+    },"Default",function(v)
+        local m={Default=Color3.fromRGB(192,204,216),Crimson=Color3.fromRGB(180,20,40),Emerald=Color3.fromRGB(20,160,80),Sapphire=Color3.fromRGB(30,80,200),Violet=Color3.fromRGB(120,30,200),Amber=Color3.fromRGB(225,145,40),Obsidian=Color3.fromRGB(10,10,15),Pearl=Color3.fromRGB(240,240,250),Rose=Color3.fromRGB(255,100,140),Jade=Color3.fromRGB(0,185,125),Toxic=Color3.fromRGB(80,255,0),Blood=Color3.fromRGB(140,0,0)}
+        Lighting.FogColor=m[v] or m.Default
+    end)
+end
+
+-- ESP
+TabContent["ESP"] = function()
+    ResetOrder()
+    Section("Player Info Tags")
+    Toggle("Name Tags",      false, function(v) ESP_Names=v    end)
+    Toggle("Distance Tags",  false, function(v) ESP_Distance=v end)
+    Toggle("Health Display", false, function(v) ESP_Health=v   end)
+    Section("Highlights (Chams)")
+    Toggle("Player Highlights", false, function(v)
+        ESP_HighlightEnabled=v
+        if not v then
+            for _, p in ipairs(Players:GetPlayers()) do
+                if p~=LocalPlayer and p.Character then
+                    local h=p.Character:FindFirstChild("WSHighlight"); if h then h:Destroy() end
+                end
+            end
+        end
+    end)
+    Toggle("See Through Walls",  true,  function(v) _G.ChamsOnTop=v   end)
+    Toggle("Use Team Colors",    false, function(v) _G.ESPTeamColor=v end)
+    ColorPicker("Highlight Color", function(c) ESP_HighlightColor=c end)
+    Slider("Fill Transparency",    0,1,0.15,0.05, function(v) ESP_HighlightFill=v    end)
+    Slider("Outline Transparency", 0,1,0,   0.05, function(v) ESP_HighlightOutline=v end)
+    Section("Actions")
+    Button("↺ Refresh All ESP", function()
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p~=LocalPlayer and p.Character then
+                local bb=p.Character:FindFirstChild("WSESP");       if bb then bb:Destroy() end
+                local h =p.Character:FindFirstChild("WSHighlight"); if h  then h:Destroy()  end
+            end
+        end
+    end, Color3.fromRGB(32,32,32))
+    Button("✕ Clear All ESP", function()
+        ESP_HighlightEnabled=false; ESP_Names=false; ESP_Distance=false; ESP_Health=false
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p~=LocalPlayer and p.Character then
+                local bb=p.Character:FindFirstChild("WSESP");       if bb then bb:Destroy() end
+                local h =p.Character:FindFirstChild("WSHighlight"); if h  then h:Destroy()  end
+            end
+        end
+    end, T.Red)
+end
+
+-- WORLD
+TabContent["World"] = function()
+    ResetOrder()
+    Section("Lighting")
+    Slider("Brightness", 0,10,2,  0.1,  function(v) Lighting.Brightness=v end)
+    Slider("Time of Day",0,24,14, 0.25, function(v) Lighting.ClockTime=v  end)
+    Section("Map Material")
+    Dropdown("Material Override",{
+        "Original","Granite","Ground","Lava","Neon","Metal","SmoothPlastic",
+        "Plastic","Slate","Wood","WoodPlanks","Ice","Glass","DiamondPlate",
+        "Cobblestone","Brick","Fabric","Concrete","ForceField","Marble","Pebble",
+    },"Original",function(v)
+        for _, o in ipairs(workspace:GetDescendants()) do
+            if o:IsA("BasePart") and OriginalParts[o] then
+                if v=="Original" then
+                    o.Material=OriginalParts[o].Material
+                    o.Reflectance=OriginalParts[o].Reflectance
+                else
+                    pcall(function() o.Material=Enum.Material[v] end)
+                end
+            end
+        end
+    end)
+    Slider("Reflectance", 0,1,0,0.05, function(v)
+        for _, o in ipairs(workspace:GetDescendants()) do
+            if o:IsA("BasePart") and OriginalParts[o] then o.Reflectance=v end
+        end
+    end)
+    Section("Map Color")
+    Dropdown("Color Preset",{
+        "Original","White","Red","Green","Blue","Black","Yellow","Pink",
+        "Cyan","Gold","Orange","Teal","Maroon","Navy","Lavender",
+    },"Original",function(v)
+        local m={White=Color3.fromRGB(255,255,255),Red=Color3.fromRGB(255,0,0),Green=Color3.fromRGB(0,220,0),Blue=Color3.fromRGB(0,0,255),Black=Color3.fromRGB(0,0,0),Yellow=Color3.fromRGB(255,255,0),Pink=Color3.fromRGB(255,105,180),Cyan=Color3.fromRGB(0,255,255),Gold=Color3.fromRGB(255,200,0),Orange=Color3.fromRGB(255,140,0),Teal=Color3.fromRGB(0,200,185),Maroon=Color3.fromRGB(128,0,0),Navy=Color3.fromRGB(0,0,128),Lavender=Color3.fromRGB(200,150,255)}
+        for _, o in ipairs(workspace:GetDescendants()) do
+            if o:IsA("BasePart") and OriginalParts[o] then
+                o.Color=v=="Original" and OriginalParts[o].Color or (m[v] or o.Color)
+            end
+        end
+    end)
+    Section("Map Modes")
+    Toggle("Neon Map",      false,function(v) for _,o in ipairs(workspace:GetDescendants()) do if o:IsA("BasePart") and OriginalParts[o] then o.Material=v and Enum.Material.Neon or OriginalParts[o].Material end end end)
+    Toggle("Invisible Map", false,function(v) for _,o in ipairs(workspace:GetDescendants()) do if o:IsA("BasePart") and OriginalParts[o] and not(LocalPlayer.Character and o:IsDescendantOf(LocalPlayer.Character)) then o.Transparency=v and 0.93 or OriginalParts[o].Transparency end end end)
+    Toggle("Low Gravity",   false, function(v) workspace.Gravity=v and 55 or 196.2 end)
+    Section("Actions")
+    Button("Remove Decals", function()
+        for _, o in ipairs(workspace:GetDescendants()) do
+            if o:IsA("Decal") or o:IsA("Texture") then o:Destroy() end
+        end
+    end, Color3.fromRGB(32,32,32))
+    Button("↺ Restore Original Map", function()
+        for part, data in pairs(OriginalParts) do
+            if part and part.Parent then
+                part.Color=data.Color; part.Material=data.Material
+                part.Reflectance=data.Reflectance; part.Transparency=data.Transparency
+            end
+        end
+    end, Color3.fromRGB(32,32,32))
+end
+
+-- UTILITY
+TabContent["Utility"] = function()
+    ResetOrder()
+    LiveStatRow()
+    Section("Player Tools")
+    local function getNames()
+        local names={}
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p~=LocalPlayer then table.insert(names,p.Name) end
+        end
+        return #names>0 and names or {"(no players)"}
+    end
+    Dropdown("Select Player", getNames(), getNames()[1], function(v)
+        SelectedPlayer=Players:FindFirstChild(v)
+    end)
+    Toggle("Spectate Selected", false, function(v)
+        if v and SelectedPlayer and SelectedPlayer.Character then
+            Camera.CameraSubject=SelectedPlayer.Character:FindFirstChild("Humanoid")
+        else
+            local h=LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid")
+            if h then Camera.CameraSubject=h end
+        end
+    end)
+    Button("→ Teleport To Player", function()
+        if SelectedPlayer and SelectedPlayer.Character then
+            local me=LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            local th=SelectedPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if me and th then me.CFrame=th.CFrame+Vector3.new(3,0,0) end
+        end
+    end, Color3.fromRGB(32,32,32))
+    Button("← Bring Player To Me", function()
+        if SelectedPlayer and SelectedPlayer.Character then
+            local me=LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            local th=SelectedPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if me and th then th.CFrame=me.CFrame+Vector3.new(3,0,0) end
+        end
+    end, Color3.fromRGB(32,32,32))
+    Section("Server")
+    Button("↺ Rejoin Server", function() TeleportService:Teleport(game.PlaceId,LocalPlayer) end, Color3.fromRGB(32,32,32))
+    Button("Copy Job ID",     function() if setclipboard then setclipboard(tostring(game.JobId)) end end, Color3.fromRGB(32,32,32))
+end
+
+-- SOUND
+TabContent["Sound"] = function()
+    ResetOrder()
+    Section("Volume Control")
+    Slider("Master Volume",  0,5,0.5,0.05, function(v) for _,s in ipairs(workspace:GetDescendants()) do if s:IsA("Sound") then s.Volume=v end end end)
+    Slider("Playback Speed", 0.1,5,1,0.05, function(v) for _,s in ipairs(workspace:GetDescendants()) do if s:IsA("Sound") then s.PlaybackSpeed=v end end end)
+    Button("Mute All",          function() for _,s in ipairs(workspace:GetDescendants()) do if s:IsA("Sound") then s.Volume=0 end end end, T.Red)
+    Button("↺ Restore Sounds",  function() for _,s in ipairs(workspace:GetDescendants()) do if s:IsA("Sound") then s.Volume=0.5; s.PlaybackSpeed=1 end end end, Color3.fromRGB(32,32,32))
+    Section("Sound FX")
+    Button("⚡ Thunder Crack",  function() local s=Instance.new("Sound",workspace); s.SoundId="rbxassetid://130758378"; s.Volume=1; s:Play(); Debris:AddItem(s,5) end, Color3.fromRGB(32,32,32))
+    Button("💥 Explosion Boom", function() local s=Instance.new("Sound",workspace); s.SoundId="rbxassetid://152840862";  s.Volume=1; s:Play(); Debris:AddItem(s,4) end, Color3.fromRGB(32,32,32))
+    Button("🌬 Air Whoosh",     function() local s=Instance.new("Sound",workspace); s.SoundId="rbxassetid://186311262";  s.Volume=1; s:Play(); Debris:AddItem(s,3) end, Color3.fromRGB(32,32,32))
+    Button("⚡ Laser Zap",      function() local s=Instance.new("Sound",workspace); s.SoundId="rbxassetid://144699737";  s.Volume=1; s:Play(); Debris:AddItem(s,3) end, Color3.fromRGB(32,32,32))
+    Section("Reverb")
+    Dropdown("Reverb Preset",{"None","Cave","Hall","Arena","Forest","Bathroom","SmallRoom"},"None",function(v)
+        local ex=Lighting:FindFirstChildOfClass("ReverbSoundEffect"); if ex then ex:Destroy() end
+        if v~="None" then
+            local rev=Instance.new("ReverbSoundEffect",Lighting)
+            local p={Cave={d=2.5,dh=0.8,w=0.9,dg=0.5},Hall={d=4.0,dh=0.7,w=0.8,dg=0.4},Arena={d=7.0,dh=0.6,w=0.7,dg=0.3},Forest={d=1.5,dh=0.9,w=0.5,dg=0.6},Bathroom={d=1.0,dh=0.95,w=0.3,dg=0.9},SmallRoom={d=0.5,dh=0.9,w=0.2,dg=0.8}}
+            local pr=p[v]; if pr then rev.DecayTime=pr.d; rev.Density=pr.dh; rev.Diffusion=pr.w; rev.DryLevel=pr.dg end
+        end
+    end)
+    Toggle("Bass Boost", false, function(v)
+        local ex=Lighting:FindFirstChildOfClass("EqualizerSoundEffect"); if ex then ex:Destroy() end
+        if v then local eq=Instance.new("EqualizerSoundEffect",Lighting); eq.LowGain=8; eq.MidGain=0; eq.HighGain=-3 end
+    end)
+end
+
+-- SETTINGS
+TabContent["Settings"] = function()
+    ResetOrder()
+    Section("Reset")
+    Button("↺ Restore Everything", function()
+        workspace.Gravity=196.2; Camera.FieldOfView=70
+        Lighting.Brightness=OriginalLighting.Brightness
+        Lighting.ClockTime=OriginalLighting.ClockTime
+        Lighting.FogEnd=OriginalLighting.FogEnd
+        Lighting.FogStart=OriginalLighting.FogStart
+        Lighting.FogColor=OriginalLighting.FogColor
+        Lighting.Ambient=OriginalLighting.Ambient
+        Lighting.OutdoorAmbient=OriginalLighting.OutdoorAmbient
+        Lighting.GeographicLatitude=OriginalLighting.GeographicLatitude
+        BloomEffect.Enabled=false; SunRays.Enabled=false
+        DOF.Enabled=false; MotionBlur.Enabled=false; ColorCorrection.Enabled=false
+        Sky.StarCount=OriginalSky.StarCount
+        Sky.MoonAngularSize=OriginalSky.MoonAngularSize
+        Sky.SunAngularSize=OriginalSky.SunAngularSize
+        RainbowLighting=false; FlickerLights=false; DayCycleEnabled=false
+        SkyboxSpinEnabled=false; MeteorEnabled=false; ThunderEnabled=false; AuroraEnabled=false
+        for part,data in pairs(OriginalParts) do
+            if part and part.Parent then
+                part.Color=data.Color; part.Material=data.Material
+                part.Reflectance=data.Reflectance; part.Transparency=data.Transparency
+            end
+        end
+        SetWeather("Clear")
+        ESP_HighlightEnabled=false; ESP_Names=false; ESP_Distance=false; ESP_Health=false
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p~=LocalPlayer and p.Character then
+                local bb=p.Character:FindFirstChild("WSESP");       if bb then bb:Destroy() end
+                local h =p.Character:FindFirstChild("WSHighlight"); if h  then h:Destroy()  end
+            end
+        end
+    end, Color3.fromRGB(32,32,32))
+    Button("Clear Post-Processing", function()
+        BloomEffect.Enabled=false; SunRays.Enabled=false
+        DOF.Enabled=false; MotionBlur.Enabled=false; ColorCorrection.Enabled=false
+    end, Color3.fromRGB(32,32,32))
+    Button("Clear Weather & FX", function()
+        SetWeather("Clear")
+        for _, o in ipairs(EffectsFolder:GetChildren()) do o:Destroy() end
+    end, Color3.fromRGB(32,32,32))
+    Button("✕ Destroy UI", function() ScreenGui:Destroy() end, T.Red)
+    Section("Keybinds")
+    InfoCard("Keyboard Shortcuts",
+        "M              →  Toggle UI visibility\n"..
+        "— (header)     →  Minimize window\n"..
+        "✕ (header)     →  Close / destroy UI\n"..
+        "Fly: WASD + Space (up) + LShift (down)")
+    Section("About")
+    InfoCard("World Script v5.0",
+        "Dark rewrite — fixed layout system, working tabs, player profile.\n\n"..
+        "All features continue running headlessly when UI is hidden.\nRerun the script to get a fresh instance.", T.AccentDim)
+end
+
+-- ============================================================
+--  Boot
+-- ============================================================
+SwitchTab("Home")
+
+-- M key toggle
+UserInputService.InputBegan:Connect(function(inp, gpe)
+    if gpe then return end
+    if inp.KeyCode==Enum.KeyCode.M then
+        UIVisible=not UIVisible
+        Win.Visible=UIVisible
+        if not UIVisible then CloseDropdown() end
+    end
+end)
+
+-- ============================================================
+--  FPS & Ping Counter
+-- ============================================================
+local frames=0; local lastT=tick()
+RunService.RenderStepped:Connect(function()
+    frames+=1
+    if tick()-lastT>=1 then
+        pcall(function()
+            local fText=tostring(frames).." fps"
+            local ok,ping=pcall(function()
+                return math.floor(Stats.Network.ServerStatsItem["Data Ping"]:GetValue())
+            end)
+            local pText=(ok and tostring(ping) or "N/A").." ms"
+            for _,lbl in ipairs(_FPS_Labels)  do pcall(function() lbl.Text=fText end) end
+            for _,lbl in ipairs(_Ping_Labels) do pcall(function() lbl.Text=pText end) end
+        end)
+        frames=0; lastT=tick()
+    end
+end)
+
+-- ============================================================
+--  Game Loops
+-- ============================================================
+
+-- Infinite jump
+UserInputService.JumpRequest:Connect(function()
+    if InfiniteJump and LocalPlayer.Character then
+        local hum=LocalPlayer.Character:FindFirstChild("Humanoid")
+        if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
+    end
+end)
+
+-- Heartbeat
+RunService.Heartbeat:Connect(function(dt)
+    if GodModeEnabled and LocalPlayer.Character then
+        local hum=LocalPlayer.Character:FindFirstChild("Humanoid")
+        if hum then hum.Health=hum.MaxHealth end
+    end
+    if SlipperyEnabled and LocalPlayer.Character then
+        for _, p in ipairs(LocalPlayer.Character:GetDescendants()) do
+            if p:IsA("BasePart") then
+                p.CustomPhysicalProperties=PhysicalProperties.new(0.1,0,0,0,0)
+            end
+        end
+    end
+    if DayCycleEnabled   then Lighting.ClockTime=(Lighting.ClockTime+(_G.DayCycleSpeed or 0.1)*dt)%24 end
+    if SkyboxSpinEnabled then
+        if _G.SkyboxSpinAxis=="Latitude" then
+            Lighting.GeographicLatitude=(Lighting.GeographicLatitude+SkyboxSpinSpeed*dt*10)%180-90
+        else
+            Lighting.ClockTime=(Lighting.ClockTime+SkyboxSpinSpeed*dt*0.5)%24
+        end
+    end
+    if RainbowLighting then
+        local hue=(tick()*(_G.RainbowSpeed or 0.08))%1
+        Lighting.Ambient=Color3.fromHSV(hue,0.55,0.85)
+        Lighting.OutdoorAmbient=Color3.fromHSV((hue+0.5)%1,0.55,0.85)
+    end
+    if FlickerLights then
+        local i=_G.FlickerIntensity or 2
+        Lighting.Brightness=math.random(math.max(1,math.floor((2-i*0.5)*10)),math.floor((2+i*0.5)*10))/10
+    end
+end)
+
+-- Ground smoke trail
+local lastGP=nil
+RunService.Heartbeat:Connect(function()
+    if GroundTrailEnabled and LocalPlayer.Character then
+        local root=LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if root then
+            if lastGP and (root.Position-lastGP).Magnitude>1 then
+                for _ = 1, math.floor(_G.SmokeDensity or 3) do
+                    local s=Instance.new("Part")
+                    s.Size=Vector3.new(0.8,0.8,0.8); s.Anchored=true; s.CanCollide=false
+                    s.Transparency=0.5; s.Material=Enum.Material.SmoothPlastic
+                    s.Color=Color3.fromRGB(160,160,160)
+                    s.CFrame=CFrame.new(root.Position-Vector3.new(math.random(-1,1),2.5,math.random(-1,1)))
+                    s.Parent=workspace
+                    local em=Instance.new("ParticleEmitter",s)
+                    em.Rate=15; em.Lifetime=NumberRange.new(0.3,0.8)
+                    em.Size=NumberSequence.new({NumberSequenceKeypoint.new(0,0.6),NumberSequenceKeypoint.new(1,2.5)})
+                    em.Transparency=NumberSequence.new({NumberSequenceKeypoint.new(0,0.2),NumberSequenceKeypoint.new(1,1)})
+                    em.Color=ColorSequence.new(Color3.fromRGB(180,180,180))
+                    em.Speed=NumberRange.new(0.5,2); Debris:AddItem(s,1.2)
+                end
+            end
+            lastGP=root.Position
+        end
+    end
+end)
+
+-- Stepped: noclip, fly, weather
+RunService.Stepped:Connect(function()
+    if Noclip and LocalPlayer.Character then
+        for _, part in ipairs(LocalPlayer.Character:GetDescendants()) do
+            if part:IsA("BasePart") then part.CanCollide=false end
+        end
+    end
+
+    if FlyEnabled and LocalPlayer.Character then
+        local hum  = LocalPlayer.Character:FindFirstChild("Humanoid")
+        local root = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if hum and root then
+            local cf=Camera.CFrame; local dir=Vector3.new()
+            if UserInputService:IsKeyDown(Enum.KeyCode.W)         then dir=dir+cf.LookVector    end
+            if UserInputService:IsKeyDown(Enum.KeyCode.S)         then dir=dir-cf.LookVector    end
+            if UserInputService:IsKeyDown(Enum.KeyCode.A)         then dir=dir-cf.RightVector   end
+            if UserInputService:IsKeyDown(Enum.KeyCode.D)         then dir=dir+cf.RightVector   end
+            if UserInputService:IsKeyDown(Enum.KeyCode.Space)     then dir=dir+Vector3.new(0,1,0) end
+            if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then dir=dir-Vector3.new(0,1,0) end
+            if dir.Magnitude>0 then dir=dir.Unit end
+            root.Velocity=dir*FlySpeed; hum.PlatformStand=dir.Magnitude>0
+        end
+    else
+        if LocalPlayer.Character then
+            local hum=LocalPlayer.Character:FindFirstChild("Humanoid")
+            if hum then hum.PlatformStand=false end
+        end
+    end
+
+    local density=math.floor(_G.WeatherDensity or 5)
+    local windX=math.cos(math.rad(_G.WindDirection or 0))*(_G.WindStrength or 10)
+    local windZ=math.sin(math.rad(_G.WindDirection or 0))*(_G.WindStrength or 10)
+    local camPos=Camera.CFrame.Position
+
+    local function SpawnDrop(color,sx,sy,mat,vy,life,wm)
+        local d=Instance.new("Part")
+        d.Size=Vector3.new(sx,sy,sx); d.Material=mat; d.Color=color
+        d.CanCollide=false; d.Anchored=false; d.CastShadow=false
+        d.Position=camPos+Vector3.new(math.random(-70,70),55,math.random(-70,70))
+        d.Parent=EffectsFolder
+        local vel=Instance.new("BodyVelocity")
+        vel.Velocity=Vector3.new(windX*(wm or 1)+math.random(-3,3),vy,windZ*(wm or 1)+math.random(-3,3))
+        vel.MaxForce=Vector3.new(9999,9999,9999); vel.Parent=d; Debris:AddItem(d,life)
+    end
+
+    if WeatherType=="Rainy" then
+        for _ = 1,density do SpawnDrop(Color3.fromRGB(170,200,255),0.05,1.5,Enum.Material.Glass,-120,1.2,0.5) end
+    elseif WeatherType=="Stormy" or WeatherType=="Hurricane" then
+        for _ = 1,density+4 do SpawnDrop(Color3.fromRGB(140,175,220),0.06,1.8,Enum.Material.Glass,-155,1.0,2.0) end
+    elseif WeatherType=="Snowy" or WeatherType=="Cold" then
+        for _ = 1,math.max(2,density-1) do
+            local f=Instance.new("Part"); f.Size=Vector3.new(0.3,0.1,0.3)
+            f.Material=Enum.Material.SmoothPlastic; f.Color=Color3.fromRGB(235,245,255)
+            f.CanCollide=false; f.Anchored=false; f.Shape=Enum.PartType.Ball
+            f.Position=camPos+Vector3.new(math.random(-70,70),45,math.random(-70,70)); f.Parent=EffectsFolder
+            local vel=Instance.new("BodyVelocity")
+            vel.Velocity=Vector3.new(windX*0.3+math.random(-5,5),-18,windZ*0.3+math.random(-5,5))
+            vel.MaxForce=Vector3.new(9999,9999,9999); vel.Parent=f; Debris:AddItem(f,3)
+        end
+    elseif WeatherType=="Blizzard" then
+        for _ = 1,density+5 do SpawnDrop(Color3.fromRGB(220,235,255),0.3,0.3,Enum.Material.SmoothPlastic,-25,2.5,3.0) end
+    elseif WeatherType=="Tornado" then
+        for _ = 1,density+2 do
+            local db=Instance.new("Part")
+            db.Size=Vector3.new(math.random(1,3)*0.4,math.random(1,3)*0.4,math.random(1,3)*0.4)
+            db.Material=Enum.Material.SmoothPlastic
+            db.Color=Color3.fromRGB(100+math.random(0,40),100+math.random(0,40),80+math.random(0,30))
+            db.CanCollide=false; db.Anchored=false
+            local angle=tick()*3; local radius=math.random(10,30)
+            db.Position=camPos+Vector3.new(math.cos(angle)*radius+math.random(-5,5),math.random(-10,20),math.sin(angle)*radius+math.random(-5,5))
+            db.Parent=EffectsFolder
+            local vel=Instance.new("BodyVelocity")
+            vel.Velocity=Vector3.new(math.cos(angle+1.5)*40,math.random(5,20),math.sin(angle+1.5)*40)
+            vel.MaxForce=Vector3.new(9999,9999,9999); vel.Parent=db; Debris:AddItem(db,1.5)
+        end
+    end
+end)
+
+-- Meteor loop
+RunService.Stepped:Connect(function(_,dt)
+    if not MeteorEnabled then return end
+    MeteorTimer+=dt
+    if MeteorTimer < 1/math.max(0.01,MeteorRate) then return end
+    MeteorTimer=0
+    local spawnPos=Camera.CFrame.Position+Vector3.new(math.random(-160,160),math.random(90,160),math.random(-160,160))
+    local target  =Camera.CFrame.Position+Vector3.new(math.random(-40,40),-60,math.random(-40,40))
+    local dir=(target-spawnPos).Unit
+    local meteor=Instance.new("Part")
+    meteor.Size=Vector3.new(MeteorSize,MeteorSize*2.8,MeteorSize); meteor.Material=Enum.Material.Rock
+    meteor.Color=_G.MeteorColor or Color3.fromRGB(110,90,70); meteor.CanCollide=false
+    meteor.CFrame=CFrame.new(spawnPos,spawnPos+dir); meteor.Parent=workspace
+    local fire=Instance.new("Fire",meteor)
+    fire.Color=_G.MeteorFireColor or Color3.fromRGB(255,140,40); fire.SecondaryColor=Color3.fromRGB(255,220,80)
+    fire.Size=MeteorSize*3.5; fire.Heat=22
+    local light=Instance.new("PointLight",meteor); light.Brightness=6; light.Range=MeteorSize*12; light.Color=fire.Color
+    local vel=Instance.new("BodyVelocity"); vel.Velocity=dir*MeteorSpeed; vel.MaxForce=Vector3.new(9999,9999,9999); vel.Parent=meteor
+    local impactDelay=(spawnPos-target).Magnitude/math.max(1,MeteorSpeed)+0.5
+    task.delay(impactDelay,function()
+        if meteor and meteor.Parent then
+            if _G.MeteorExplosions then
+                local boom=Instance.new("Explosion"); boom.BlastRadius=_G.MeteorExplosionRadius or 5
+                boom.BlastPressure=0; boom.Position=meteor.Position; boom.Parent=workspace
+                local ob=Lighting.Brightness; Lighting.Brightness=ob+2
+                task.delay(0.1,function() Lighting.Brightness=ob end)
+            end
+            meteor:Destroy()
+        end
+    end)
+    Debris:AddItem(meteor,impactDelay+1)
+end)
+
+-- Thunder loop
+RunService.Stepped:Connect(function(_,dt)
+    if not ThunderEnabled then ThunderTimer=0; return end
+    ThunderTimer+=dt
+    local interval=_G.ThunderInterval or 5
+    if ThunderTimer < interval*(0.75+math.random()*0.5) then return end
+    ThunderTimer=0
+    local ob=Lighting.Brightness
+    Lighting.Brightness=ob+5
+    task.delay(0.06,  function() Lighting.Brightness=ob     end)
+    task.delay(0.16,  function() Lighting.Brightness=ob+4.5 end)
+    task.delay(0.24,  function() Lighting.Brightness=ob     end)
+    task.delay(math.random(5,20)*0.1,function()
+        local s=Instance.new("Sound",workspace)
+        s.SoundId="rbxassetid://130758378"; s.Volume=0.6+math.random()*0.4; s.PlaybackSpeed=0.8+math.random()*0.4
+        s:Play(); Debris:AddItem(s,5)
+    end)
+end)
+
+-- ESP loop
+RunService.RenderStepped:Connect(function()
+    for _, v in ipairs(Players:GetPlayers()) do
+        if v~=LocalPlayer and v.Character then
+            local char=v.Character
+            local hrp =char:FindFirstChild("HumanoidRootPart")
+            local head=char:FindFirstChild("Head")
+            local hum =char:FindFirstChild("Humanoid")
+            if hrp and head then
+                local bb=char:FindFirstChild("WSESP")
+                local needBB = ESP_Names or ESP_Distance or ESP_Health
+                if needBB then
+                    if not bb then
+                        bb=Instance.new("BillboardGui"); bb.Name="WSESP"; bb.AlwaysOnTop=true
+                        bb.Size=UDim2.new(0,134,0,74); bb.StudsOffset=Vector3.new(0,3.8,0)
+                        bb.Adornee=head; bb.Parent=char
+                    end
+                    local nl=bb:FindFirstChild("NL")
+                    if ESP_Names then
+                        if not nl then
+                            nl=Instance.new("TextLabel",bb); nl.Name="NL"
+                            nl.Size=UDim2.new(1,0,0,22); nl.Position=UDim2.new(0,0,0,0)
+                            nl.BackgroundTransparency=1; nl.TextColor3=Color3.fromRGB(255,255,255)
+                            nl.TextStrokeTransparency=0; nl.Font=Enum.Font.GothamBold; nl.TextScaled=true
+                        end
+                        nl.Text=v.Name; nl.Visible=true
+                    elseif nl then nl.Visible=false end
+                    local dl=bb:FindFirstChild("DL")
+                    if ESP_Distance then
+                        if not dl then
+                            dl=Instance.new("TextLabel",bb); dl.Name="DL"
+                            dl.Size=UDim2.new(1,0,0,18); dl.Position=UDim2.new(0,0,0,22)
+                            dl.BackgroundTransparency=1; dl.TextColor3=Color3.fromRGB(220,220,220)
+                            dl.TextStrokeTransparency=0; dl.Font=Enum.Font.Gotham; dl.TextScaled=true
+                        end
+                        local myHRP=LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                        if myHRP then dl.Text=math.floor((hrp.Position-myHRP.Position).Magnitude).." studs" end
+                        dl.Visible=true
+                    elseif dl then dl.Visible=false end
+                    local hl=bb:FindFirstChild("HL")
+                    if ESP_Health and hum then
+                        if not hl then
+                            hl=Instance.new("TextLabel",bb); hl.Name="HL"
+                            hl.Size=UDim2.new(1,0,0,18); hl.Position=UDim2.new(0,0,0,44)
+                            hl.BackgroundTransparency=1; hl.TextStrokeTransparency=0
+                            hl.Font=Enum.Font.Gotham; hl.TextScaled=true
+                        end
+                        local pct=hum.Health/math.max(1,hum.MaxHealth)
+                        hl.TextColor3=Color3.fromRGB(math.floor((1-pct)*255),math.floor(pct*255),50)
+                        hl.Text="HP "..math.floor(hum.Health).."/"..math.floor(hum.MaxHealth); hl.Visible=true
+                    elseif hl then hl.Visible=false end
+                else
+                    if bb then bb:Destroy() end
+                end
+
+                local exHL=char:FindFirstChild("WSHighlight")
+                if ESP_HighlightEnabled then
+                    local hlColor=ESP_HighlightColor
+                    if _G.ESPTeamColor then
+                        pcall(function() hlColor=v.TeamColor and Color3.fromBrickColor(v.TeamColor) or hlColor end)
+                    end
+                    if not exHL then
+                        local h2=Instance.new("Highlight",char); h2.Name="WSHighlight"
+                        h2.FillColor=hlColor; h2.OutlineColor=Color3.fromRGB(255,255,255)
+                        h2.FillTransparency=ESP_HighlightFill; h2.OutlineTransparency=ESP_HighlightOutline
+                        h2.DepthMode=_G.ChamsOnTop and Enum.HighlightDepthMode.AlwaysOnTop or Enum.HighlightDepthMode.Occluded
+                    else
+                        exHL.FillColor=hlColor; exHL.FillTransparency=ESP_HighlightFill
+                        exHL.OutlineTransparency=ESP_HighlightOutline
+                        exHL.DepthMode=_G.ChamsOnTop and Enum.HighlightDepthMode.AlwaysOnTop or Enum.HighlightDepthMode.Occluded
+                    end
+                else
+                    if exHL then exHL:Destroy() end
+                end
+            end
+        end
+    end
+end)
+
+-- ============================================================
+--  Load Toast
+-- ============================================================
+task.delay(0.3,function()
+    if not ScreenGui or not ScreenGui.Parent then return end
+    local toast=New("Frame",{
+        Size=UDim2.new(0,260,0,52),
+        Position=UDim2.new(1,10,1,-68),
+        BackgroundColor3=Color3.fromRGB(12,12,12),
+        BorderSizePixel=0,
+    },ScreenGui)
+    Rnd(8,toast)
+    Stroke(Color3.fromRGB(50,50,50),1,toast)
+    New("TextLabel",{
+        Text="✓  World Script v5.0 Loaded",
+        Size=UDim2.new(1,-12,0,22), Position=UDim2.new(0,12,0,6),
+        BackgroundTransparency=1,
+        TextColor3=T.Text, Font=Enum.Font.GothamBold, TextSize=12,
+        TextXAlignment=Enum.TextXAlignment.Left,
+    },toast)
+    New("TextLabel",{
+        Text="M key to toggle visibility",
+        Size=UDim2.new(1,-12,0,14), Position=UDim2.new(0,12,0,30),
+        BackgroundTransparency=1,
+        TextColor3=T.TextMuted, Font=Enum.Font.Gotham, TextSize=10,
+        TextXAlignment=Enum.TextXAlignment.Left,
+    },toast)
+    Tween(toast,{Position=UDim2.new(1,-272,1,-68)},0.3)
+    task.delay(3.8,function()
+        Tween(toast,{Position=UDim2.new(1,10,1,-68)},0.35)
+        task.delay(0.4,function() pcall(function() toast:Destroy() end) end)
+    end)
+end)
